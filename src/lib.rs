@@ -30,10 +30,10 @@
 pub mod color;
 pub mod driver;
 
-#[cfg(feature = "graphics")]
-pub mod graphics;
 mod cmd;
 mod flag;
+#[cfg(feature = "graphics")]
+pub mod graphics;
 
 /// Maximum display height this driver supports
 pub const MAX_HEIGHT: u16 = 296;
@@ -47,7 +47,8 @@ pub const HEIGHT: u8 = 250;
 /// Display width
 pub const WIDTH: u8 = 122;
 
-pub mod interface;
+//pub mod interface; using display-interface now, see
+//https://crates.io/crates/display-interface-spi for an SPI implementation of it
 
 /// Useful exports
 pub mod prelude {
