@@ -27,6 +27,7 @@
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::missing_errors_doc)]
 
+pub mod async_driver;
 pub mod color;
 pub mod driver;
 
