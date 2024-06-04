@@ -30,7 +30,7 @@ impl Default for DisplayRotation {
 /// - Drawing (With the help of DrawTarget/Embedded Graphics)
 /// - Rotations
 /// - Clearing
-pub trait Display: DrawTarget {
+pub trait Display: DrawTarget + OriginDimensions {
     /// Clears the buffer of the display with the chosen background color
     fn clear_buffer(&mut self, background_color: Color) {
         let fill_color = if self.is_inverted() {
@@ -62,23 +62,25 @@ pub trait Display: DrawTarget {
     /// Helperfunction for the Embedded Graphics draw trait
     ///
     /// Becomes uneccesary when `const_generics` become stablised
-    fn draw_helper(
-        &mut self,
-        width: u32,
-        height: u32,
-        pixel: Pixel<BinaryColor>,
-    ) -> Result<(), Self::Error> {
+    fn draw_helper(&mut self, pixel: Pixel<BinaryColor>) -> Result<(), Self::Error> {
         let rotation = self.rotation();
         let is_inverted = self.is_inverted();
+        let size = self.size();
         let buffer = self.get_mut_buffer();
 
         let Pixel(point, color) = pixel;
-        if outside_display(point, width, height, rotation) {
+        if outside_display(point, size.width, size.height, rotation) {
             return Ok(());
         }
 
         // Give us index inside the buffer and the bit-position in that u8 which needs to be changed
-        let (index, bit) = find_position(point.x as u32, point.y as u32, width, height, rotation);
+        let (index, bit) = find_position(
+            point.x as u32,
+            point.y as u32,
+            size.width,
+            size.height,
+            rotation,
+        );
         let index = index as usize;
 
         // "Draw" the Pixel on that bit
@@ -145,7 +147,7 @@ impl DrawTarget for Display2in13 {
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
         for p in pixels.into_iter() {
-            self.draw_helper(WIDTH.into(), HEIGHT.into(), p)?;
+            self.draw_helper(p)?;
         }
         Ok(())
     }
