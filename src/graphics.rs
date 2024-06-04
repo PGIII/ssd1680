@@ -103,7 +103,9 @@ pub trait Display: DrawTarget {
         Ok(())
     }
     /// returns number of bytes required for display buffer
-    fn buffer_size() -> usize;
+    fn buffer_size(&self) -> usize {
+        self.buffer().len()
+    }
 }
 
 /// Display for a 122x250 panel
@@ -182,10 +184,6 @@ impl Display for Display2in13 {
 
     fn is_inverted(&self) -> bool {
         self.is_inverted
-    }
-
-    fn buffer_size() -> usize {
-        buffer_len(WIDTH as usize, HEIGHT as usize)
     }
 }
 
