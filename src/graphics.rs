@@ -130,6 +130,11 @@ impl Display2in13 {
             is_inverted: false,
         }
     }
+
+    /// return number of bytes required for display buffer
+    pub fn buffer_size() -> usize {
+        buffer_len(WIDTH as usize, HEIGHT as usize)
+    }
 }
 
 impl DrawTarget for Display2in13 {
