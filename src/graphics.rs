@@ -63,24 +63,17 @@ pub trait Display: DrawTarget + OriginDimensions {
     ///
     /// Becomes uneccesary when `const_generics` become stablised
     fn draw_helper(&mut self, pixel: Pixel<BinaryColor>) -> Result<(), Self::Error> {
-        let rotation = self.rotation();
         let is_inverted = self.is_inverted();
         let size = self.size();
         let buffer = self.get_mut_buffer();
 
         let Pixel(point, color) = pixel;
-        if outside_display(point, size.width, size.height, rotation) {
+        if outside_display(point, size.width, size.height) {
             return Ok(());
         }
 
         // Give us index inside the buffer and the bit-position in that u8 which needs to be changed
-        let (index, bit) = find_position(
-            point.x as u32,
-            point.y as u32,
-            size.width,
-            size.height,
-            rotation,
-        );
+        let (index, bit) = find_position(point.x as u32, point.y as u32, size.width);
         let index = index as usize;
 
         // "Draw" the Pixel on that bit
@@ -190,57 +183,40 @@ impl Display for Display2in13 {
 }
 
 // Checks if a pos is outside the defined display
-fn outside_display(p: Point, width: u32, height: u32, rotation: DisplayRotation) -> bool {
-    if p.x < 0 || p.y < 0 {
-        return true;
-    }
+fn outside_display(p: Point, width: u32, height: u32) -> bool {
     let (x, y) = (p.x as u32, p.y as u32);
-    match rotation {
-        DisplayRotation::Rotate0 | DisplayRotation::Rotate180 => {
-            if x >= width || y >= height {
-                return true;
-            }
-        }
-        DisplayRotation::Rotate90 | DisplayRotation::Rotate270 => {
-            if y >= width || x >= height {
-                return true;
-            }
-        }
-    }
-    false
+    p.x < 0 || p.y < 0 || x >= width || y >= height
 }
 
-fn find_rotation(x: u32, y: u32, width: u32, height: u32, rotation: DisplayRotation) -> (u32, u32) {
-    let nx;
-    let ny;
-    match rotation {
-        DisplayRotation::Rotate0 => {
-            nx = x;
-            ny = y;
-        }
-        DisplayRotation::Rotate90 => {
-            nx = width - 1 - y;
-            ny = x;
-        }
-        DisplayRotation::Rotate180 => {
-            nx = width - 1 - x;
-            ny = height - 1 - y;
-        }
-        DisplayRotation::Rotate270 => {
-            nx = y;
-            ny = height - 1 - x;
-        }
-    }
-    (nx, ny)
-}
-
+// fn find_rotation(x: u32, y: u32, width: u32, height: u32, rotation: DisplayRotation) -> (u32, u32) {
+//     let nx;
+//     let ny;
+//     match rotation {
+//         DisplayRotation::Rotate0 => {
+//             nx = x;
+//             ny = y;
+//         }
+//         DisplayRotation::Rotate90 => {
+//             nx = width - 1 - y;
+//             ny = x;
+//         }
+//         DisplayRotation::Rotate180 => {
+//             nx = width - 1 - x;
+//             ny = height - 1 - y;
+//         }
+//         DisplayRotation::Rotate270 => {
+//             nx = y;
+//             ny = height - 1 - x;
+//         }
+//     }
+//     (nx, ny)
+// }
 #[rustfmt::skip]
 //returns index position in the u8-slice and the bit-position inside that u8
-fn find_position(x: u32, y: u32, width: u32, height: u32, rotation: DisplayRotation) -> (u32, u8) {
-    let (nx, ny) = find_rotation(x, y, width, height, rotation);
+fn find_position(x: u32, y: u32, width: u32) -> (u32, u8) {
     (
-        nx / 8 + ((width + 7) / 8) * ny,
-        0x80 >> (nx % 8),
+        x / 8 + ((width + 7) / 8) * y,
+        0x80 >> (x % 8),
     )
 }
 
@@ -273,31 +249,32 @@ mod tests {
         }
     }
 
-    #[test]
-    fn rotation_overflow() {
-        use crate::{HEIGHT, WIDTH};
-        let width = WIDTH as u32;
-        let height = HEIGHT as u32;
-        test_rotation_overflow(width, height, DisplayRotation::Rotate0);
-        test_rotation_overflow(width, height, DisplayRotation::Rotate90);
-        test_rotation_overflow(width, height, DisplayRotation::Rotate180);
-        test_rotation_overflow(width, height, DisplayRotation::Rotate270);
-    }
-
-    fn test_rotation_overflow(width: u32, height: u32, rotation2: DisplayRotation) {
-        let max_value = width / 8 * height;
-        for x in 0..(width + height) {
-            //limit x because it runs too long
-            for y in 0..(u32::max_value()) {
-                if outside_display(Point::new(x as i32, y as i32), width, height, rotation2) {
-                    break;
-                } else {
-                    let (idx, _) = find_position(x, y, width, height, rotation2);
-                    assert!(idx < max_value);
-                }
-            }
-        }
-    }
+    // Rotation is being handled by the size function now
+    // #[test]
+    // fn rotation_overflow() {
+    //     use crate::{HEIGHT, WIDTH};
+    //     let width = WIDTH as u32;
+    //     let height = HEIGHT as u32;
+    //     test_rotation_overflow(width, height, DisplayRotation::Rotate0);
+    //     test_rotation_overflow(width, height, DisplayRotation::Rotate90);
+    //     test_rotation_overflow(width, height, DisplayRotation::Rotate180);
+    //     test_rotation_overflow(width, height, DisplayRotation::Rotate270);
+    // }
+    //
+    // fn test_rotation_overflow(width: u32, height: u32, rotation2: DisplayRotation) {
+    //     let max_value = width / 8 * height;
+    //     for x in 0..(width + height) {
+    //         //limit x because it runs too long
+    //         for y in 0..(u32::max_value()) {
+    //             if outside_display(Point::new(x as i32, y as i32), width, height, rotation2) {
+    //                 break;
+    //             } else {
+    //                 let (idx, _) = find_position(x, y, width, height, rotation2);
+    //                 assert!(idx < max_value);
+    //             }
+    //         }
+    //     }
+    // }
 
     #[test]
     fn graphics_rotation_0() {
