@@ -6,7 +6,7 @@ use display_interface::DisplayError;
 use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
 
 /// Displayrotation
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum DisplayRotation {
     /// No rotation
     Rotate0,
@@ -233,8 +233,8 @@ fn find_rotation(x: u32, y: u32, width: u32, height: u32, rotation: DisplayRotat
 fn find_position(x: u32, y: u32, width: u32, height: u32, rotation: DisplayRotation) -> (u32, u8) {
     let (nx, ny) = find_rotation(x, y, width, height, rotation);
     (
-        nx / 8 + ((width + 7) / 8) * ny,
-        0x80 >> (nx % 8),
+        (nx + ny * width)/8,
+        1 << (nx % 8),
     )
 }
 
@@ -242,11 +242,14 @@ fn find_position(x: u32, y: u32, width: u32, height: u32, rotation: DisplayRotat
 /// is not divisible by 8.
 #[must_use]
 const fn buffer_len(width: usize, height: usize) -> usize {
-    (width + 7) / 8 * height
+    let whole = width * height;
+    let remain = if whole % 8 == 0 { 0 } else { 1 };
+    whole / 8 + remain
 }
 
 #[cfg(test)]
 mod tests {
+    use super::buffer_len;
     use super::{find_position, outside_display, Display, Display2in13, DisplayRotation};
     use crate::color::Black;
     use crate::color::Color;
@@ -279,7 +282,7 @@ mod tests {
     }
 
     fn test_rotation_overflow(width: u32, height: u32, rotation2: DisplayRotation) {
-        let max_value = width / 8 * height;
+        let max_value = (buffer_len(width as usize, height as usize)) as u32;
         for x in 0..(width + height) {
             //limit x because it runs too long
             for y in 0..(u32::max_value()) {
@@ -287,7 +290,17 @@ mod tests {
                     break;
                 } else {
                     let (idx, _) = find_position(x, y, width, height, rotation2);
-                    assert!(idx < max_value);
+                    assert!(
+                        idx < max_value,
+                        "Out of Bounds: Max Width:{}, Max Height:{}\nX:{} Y:{}\nRotation:{:?}\nMaxIdx:{} Got:{}",
+                        width,
+                        height,
+                        x,
+                        y,
+                        rotation2,
+                        max_value,
+                        idx
+                    );
                 }
             }
         }
