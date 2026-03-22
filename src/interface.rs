@@ -92,3 +92,71 @@ where
         delay.delay_ms(RESET_DELAY_MS.into());
     }
 }
+
+#[cfg(feature = "async")]
+impl<SPI, BSY, DC, RST> DisplayInterface<SPI, BSY, DC, RST>
+where
+    SPI: embedded_hal_async::spi::SpiDevice,
+    RST: OutputPin,
+    DC: OutputPin,
+    BSY: InputPin,
+{
+    pub(crate) async fn cmd_async(&mut self, command: u8) -> Result<(), DisplayError> {
+        self.dc.set_low().map_err(|_| DisplayError::DCError)?;
+        self.spi
+            .write(&[command])
+            .await
+            .map_err(|_| DisplayError::BusWriteError)
+    }
+
+    pub(crate) async fn data_async(&mut self, data: &[u8]) -> Result<(), DisplayError> {
+        self.dc.set_high().map_err(|_| DisplayError::DCError)?;
+        self.spi
+            .write(data)
+            .await
+            .map_err(|_| DisplayError::BusWriteError)
+    }
+
+    pub(crate) async fn cmd_with_data_async(
+        &mut self,
+        command: u8,
+        data: &[u8],
+    ) -> Result<(), DisplayError> {
+        self.cmd_async(command).await?;
+        self.data_async(data).await
+    }
+
+    pub(crate) async fn data_x_times_async(
+        &mut self,
+        val: u8,
+        repetitions: u32,
+    ) -> Result<(), DisplayError> {
+        self.dc.set_high().map_err(|_| DisplayError::DCError)?;
+        for _ in 0..repetitions {
+            self.spi
+                .write(&[val])
+                .await
+                .map_err(|_| DisplayError::BusWriteError)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn wait_until_idle_async(
+        &mut self,
+        delay: &mut impl embedded_hal_async::delay::DelayNs,
+    ) {
+        while self.busy.is_high().unwrap_or(true) {
+            delay.delay_ms(1).await;
+        }
+    }
+
+    pub(crate) async fn reset_async(
+        &mut self,
+        delay: &mut impl embedded_hal_async::delay::DelayNs,
+    ) {
+        self.rst.set_low().unwrap();
+        delay.delay_ms(RESET_DELAY_MS.into()).await;
+        self.rst.set_high().unwrap();
+        delay.delay_ms(RESET_DELAY_MS.into()).await;
+    }
+}

@@ -30,6 +30,9 @@
 pub mod color;
 pub mod driver;
 
+#[cfg(feature = "async")]
+pub mod async_driver;
+
 #[cfg(feature = "graphics")]
 pub mod graphics;
 mod cmd;
@@ -53,6 +56,9 @@ pub mod interface;
 pub mod prelude {
     pub use crate::color::Color;
     pub use crate::driver::Ssd1680;
+
+    #[cfg(feature = "async")]
+    pub use crate::async_driver::Ssd1680Async;
 
     #[cfg(feature = "graphics")]
     pub use crate::graphics::{Display, Display2in13, DisplayRotation};
