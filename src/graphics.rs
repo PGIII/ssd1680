@@ -202,7 +202,7 @@ fn outside_display(p: Point, width: u32, height: u32, rotation: DisplayRotation)
             }
         }
         DisplayRotation::Rotate90 | DisplayRotation::Rotate270 => {
-            if y >= width || x >= height {
+            if x >= width || y >= height {
                 return true;
             }
         }
@@ -219,27 +219,30 @@ fn find_rotation(x: u32, y: u32, width: u32, height: u32, rotation: DisplayRotat
             ny = y;
         }
         DisplayRotation::Rotate90 => {
-            nx = width - 1 - y;
-            ny = x;
+            nx = y;
+            ny = width - 1 - x;
         }
         DisplayRotation::Rotate180 => {
             nx = width - 1 - x;
             ny = height - 1 - y;
         }
         DisplayRotation::Rotate270 => {
-            nx = y;
-            ny = height - 1 - x;
+            nx = height - 1 - y;
+            ny = x;
         }
     }
     (nx, ny)
 }
 
-#[rustfmt::skip]
 //returns index position in the u8-slice and the bit-position inside that u8
 fn find_position(x: u32, y: u32, width: u32, height: u32, rotation: DisplayRotation) -> (u32, u8) {
     let (nx, ny) = find_rotation(x, y, width, height, rotation);
+    let phys_width = match rotation {
+        DisplayRotation::Rotate0 | DisplayRotation::Rotate180 => width,
+        DisplayRotation::Rotate90 | DisplayRotation::Rotate270 => height,
+    };
     (
-        nx / 8 + ((width + 7) / 8) * ny,
+        nx / 8 + ((phys_width + 7) / 8) * ny,
         0x80 >> (nx % 8),
     )
 }
@@ -285,14 +288,18 @@ mod tests {
     }
 
     fn test_rotation_overflow(width: u32, height: u32, rotation2: DisplayRotation) {
-        let max_value = width / 8 * height;
-        for x in 0..(width + height) {
+        let (logical_w, logical_h) = match rotation2 {
+            DisplayRotation::Rotate0 | DisplayRotation::Rotate180 => (width, height),
+            DisplayRotation::Rotate90 | DisplayRotation::Rotate270 => (height, width),
+        };
+        let max_value = (width + 7) / 8 * height;
+        for x in 0..(logical_w + logical_h) {
             //limit x because it runs too long
-            for y in 0..(u32::max_value()) {
-                if outside_display(Point::new(x as i32, y as i32), width, height, rotation2) {
+            for y in 0..u32::MAX {
+                if outside_display(Point::new(x as i32, y as i32), logical_w, logical_h, rotation2) {
                     break;
                 } else {
-                    let (idx, _) = find_position(x, y, width, height, rotation2);
+                    let (idx, _) = find_position(x, y, logical_w, logical_h, rotation2);
                     assert!(idx < max_value);
                 }
             }
