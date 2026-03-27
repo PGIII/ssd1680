@@ -10,9 +10,44 @@ use embedded_hal_async::delay::DelayNs as AsyncDelayNs;
 use embedded_hal_async::spi::SpiDevice as AsyncSpiDevice;
 
 use crate::interface::DisplayInterface;
+
+// Waveshare 2.13" V3 partial-update waveform LUT (159 bytes, SSD1680 datasheet §6.7)
+// Source: https://github.com/waveshare/e-Paper/blob/master/RaspberryPi_JetsonNano/c/lib/e-Paper/EPD_2in13_V3.c
+#[rustfmt::skip]
+const PARTIAL_LUT: [u8; 159] = [
+    // bytes 0–59: voltage phase data (5 LUT entries × 12 bytes, verbatim from Waveshare)
+    0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x80, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x40, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // bytes 60–143: timing rows (12 rows × 7 bytes)
+    0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // phase 1: 20 frames
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // phase 2: 1 frame
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // phase 3: 1 frame
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // bytes 144–152: LUT group repeat flags
+    0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x00, 0x00, 0x00,
+    // byte 153: LUT end option (reg 0x3F)
+    0x22,
+    // byte 154: gate driving voltage (reg 0x03)
+    0x17,
+    // bytes 155–157: source driving voltage (reg 0x04)
+    0x41, 0x00, 0x32,
+    // byte 158: VCOM (reg 0x2C)
+    0x36,
+];
 #[cfg(feature = "async")]
 use crate::interface::DisplayInterfaceAsync;
-use crate::{cmd, color, flag, HEIGHT, WIDTH};
+use crate::{cmd, flag, HEIGHT, WIDTH};
 
 #[maybe_async_cfg::maybe(
     sync(keep_self),
@@ -109,52 +144,94 @@ where
         Ok(())
     }
 
-    /// Update the whole BW buffer on the display driver
-    pub async fn update_bw_frame(&mut self, buffer: &[u8]) -> Result<(), DisplayError> {
+    /// Full refresh: write buffer to both BW and Red RAMs then trigger a full update.
+    /// Call once after init (or to clear ghosting) before using display_frame().
+    /// Writing to both RAMs seeds the ping-pong comparison for subsequent partial updates.
+    pub async fn full_refresh(
+        &mut self,
+        buffer: &[u8],
+        delay: &mut impl DelayNs,
+    ) -> Result<(), DisplayError> {
         self.use_full_frame().await?;
         self.interface
             .cmd_with_data(cmd::Cmd::WRITE_BW_DATA, buffer)
-            .await
-    }
-
-    /// Update the whole Red buffer on the display driver
-    pub async fn update_red_frame(&mut self, buffer: &[u8]) -> Result<(), DisplayError> {
+            .await?;
         self.use_full_frame().await?;
         self.interface
             .cmd_with_data(cmd::Cmd::WRITE_RED_DATA, buffer)
-            .await
-    }
-
-    /// Start an update of the whole display
-    pub async fn display_frame(&mut self, delay: &mut impl DelayNs) -> Result<(), DisplayError> {
+            .await?;
         self.interface
-            .cmd_with_data(
-                cmd::Cmd::UPDATE_DISPLAY_CTRL2,
-                &[flag::Flag::DISPLAY_MODE_1],
-            )
+            .cmd_with_data(cmd::Cmd::UPDATE_DISPLAY_CTRL2, &[flag::Flag::DISPLAY_MODE_1])
             .await?;
         self.interface.cmd(cmd::Cmd::MASTER_ACTIVATE).await?;
         self.interface.wait_until_idle(delay).await;
         Ok(())
     }
 
-    /// Make the whole black and white frame on the display driver white
-    pub async fn clear_bw_frame(&mut self) -> Result<(), DisplayError> {
-        self.use_full_frame().await?;
-        let color = color::Color::White.get_byte_value();
-        self.interface.cmd(cmd::Cmd::WRITE_BW_DATA).await?;
+    /// Partial update: fast refresh using the partial waveform LUT.
+    /// Sequence mirrors EPD_2in13_V3_Display_Partial from the Waveshare reference driver.
+    pub async fn display_frame(
+        &mut self,
+        buffer: &[u8],
+        delay: &mut impl DelayNs,
+    ) -> Result<(), DisplayError> {
+        // Brief RST pulse resets the ping-pong counter so BW RAM is always treated
+        // as the "new" state for this update (mirrors Waveshare EPD_2in13_V3_Display_Partial)
+        self.interface.brief_reset(delay).await;
+        self.load_partial_lut().await?;
+
+        // Enable RAM ping-pong (byte 5 = 0x40): controller compares BW RAM vs Red RAM
+        // to determine per-pixel transition type for the LUT
         self.interface
-            .data_x_times(color, u32::from(WIDTH) / 8 * u32::from(HEIGHT))
-            .await
+            .cmd_with_data(
+                cmd::Cmd::WRITE_DISP_OPT,
+                &[0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00],
+            )
+            .await?;
+
+        // Border waveform: HiZ during partial update
+        self.interface
+            .cmd_with_data(cmd::Cmd::BORDER_WAVEFORM_CONTROL, &[0x80])
+            .await?;
+
+        // Enable clock and analog, then wait — prepares controller to accept new image data
+        self.interface
+            .cmd_with_data(cmd::Cmd::UPDATE_DISPLAY_CTRL2, &[flag::Flag::DISPLAY_CLK_ANALOG])
+            .await?;
+        self.interface.cmd(cmd::Cmd::MASTER_ACTIVATE).await?;
+        self.interface.wait_until_idle(delay).await;
+
+        // Write new image to BW RAM (Red RAM retains the previous frame for comparison)
+        self.use_full_frame().await?;
+        self.interface
+            .cmd_with_data(cmd::Cmd::WRITE_BW_DATA, buffer)
+            .await?;
+
+        // Trigger partial update
+        self.interface
+            .cmd_with_data(cmd::Cmd::UPDATE_DISPLAY_CTRL2, &[flag::Flag::DISPLAY_PARTIAL])
+            .await?;
+        self.interface.cmd(cmd::Cmd::MASTER_ACTIVATE).await?;
+        self.interface.wait_until_idle(delay).await;
+
+        Ok(())
     }
 
-    /// Make the whole red frame on the display driver white
-    pub async fn clear_red_frame(&mut self) -> Result<(), DisplayError> {
-        self.use_full_frame().await?;
-        let color = color::Color::White.inverse().get_byte_value();
-        self.interface.cmd(cmd::Cmd::WRITE_RED_DATA).await?;
+    async fn load_partial_lut(&mut self) -> Result<(), DisplayError> {
         self.interface
-            .data_x_times(color, u32::from(WIDTH) / 8 * u32::from(HEIGHT))
+            .cmd_with_data(cmd::Cmd::WRITE_LUT, &PARTIAL_LUT[..153])
+            .await?;
+        self.interface
+            .cmd_with_data(cmd::Cmd::WRITE_LUT_END, &PARTIAL_LUT[153..154])
+            .await?;
+        self.interface
+            .cmd_with_data(cmd::Cmd::GATE_DRIVING_VOLTAGE, &PARTIAL_LUT[154..155])
+            .await?;
+        self.interface
+            .cmd_with_data(cmd::Cmd::SOURCE_DRIVING_VOLTAGE, &PARTIAL_LUT[155..158])
+            .await?;
+        self.interface
+            .cmd_with_data(cmd::Cmd::WRITE_VCOM, &PARTIAL_LUT[158..159])
             .await
     }
 

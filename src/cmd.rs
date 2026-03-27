@@ -10,6 +10,15 @@ impl Cmd {
     pub const SET_RAMXPOS: u8 = 0x44;
     pub const SET_RAMYPOS: u8 = 0x45;
 
+    // LUT / waveform
+    pub const WRITE_LUT: u8 = 0x32;
+    pub const WRITE_LUT_END: u8 = 0x3F;         // byte 153 of waveform setting
+    pub const GATE_DRIVING_VOLTAGE: u8 = 0x03;  // byte 154
+    pub const SOURCE_DRIVING_VOLTAGE: u8 = 0x04; // bytes 155-157
+    pub const WRITE_VCOM: u8 = 0x2C;            // byte 158
+
+    pub const WRITE_DISP_OPT: u8 = 0x37;    // display option / RAM ping-pong enable
+
     // Update
     pub const SET_RAMX_COUNTER: u8 = 0x4E;
     pub const SET_RAMY_COUNTER: u8 = 0x4F;

@@ -121,4 +121,12 @@ where
         self.rst.set_high().unwrap();
         delay.delay_ms(RESET_DELAY_MS).await;
     }
+
+    /// Short RST pulse (1 ms) to reset the ping-pong RAM counter before each partial update,
+    /// without disturbing register settings or RAM contents.
+    pub(crate) async fn brief_reset(&mut self, delay: &mut impl DelayNs) {
+        self.rst.set_low().unwrap();
+        delay.delay_ms(1).await;
+        self.rst.set_high().unwrap();
+    }
 }
