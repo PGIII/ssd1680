@@ -45,6 +45,18 @@ const PARTIAL_LUT: [u8; 159] = [
     // byte 158: VCOM (reg 0x2C)
     0x36,
 ];
+
+// LUT byte offsets — derived from the table's logical structure rather than hardcoded
+const LUT_VOLTAGE_BYTES: usize = 5 * 12; // 5 voltage phase entries × 12 bytes each
+const LUT_TIMING_BYTES: usize = 12 * 7;  // 12 timing rows × 7 bytes each
+const LUT_FLAGS_BYTES: usize = 9;        // group repeat flags
+const LUT_MAIN_LEN: usize = LUT_VOLTAGE_BYTES + LUT_TIMING_BYTES + LUT_FLAGS_BYTES; // → reg 0x32
+const LUT_END_OPTION_OFFSET: usize = LUT_MAIN_LEN;                // 1 byte  → reg 0x3F
+const LUT_GATE_VOLTAGE_OFFSET: usize = LUT_END_OPTION_OFFSET + 1; // 1 byte  → reg 0x03
+const LUT_SOURCE_VOLTAGE_OFFSET: usize = LUT_GATE_VOLTAGE_OFFSET + 1; // 3 bytes → reg 0x04
+const LUT_VCOM_OFFSET: usize = LUT_SOURCE_VOLTAGE_OFFSET + 3;     // 1 byte  → reg 0x2C
+const _: () = assert!(PARTIAL_LUT.len() == LUT_VCOM_OFFSET + 1);
+
 #[cfg(feature = "async")]
 use crate::interface::DisplayInterfaceAsync;
 use crate::{cmd, flag, HEIGHT, WIDTH};
@@ -135,7 +147,7 @@ where
             .await?;
 
         self.interface
-            .cmd_with_data(cmd::Cmd::DISPLAY_UPDATE_CONTROL, &[0x00, 0x80])
+            .cmd_with_data(cmd::Cmd::DISPLAY_UPDATE_CONTROL, &[0x00, flag::Flag::DISPLAY_UPDATE_SOURCE_OUTPUT])
             .await?;
 
         self.use_full_frame().await?;
@@ -185,13 +197,13 @@ where
         self.interface
             .cmd_with_data(
                 cmd::Cmd::WRITE_DISP_OPT,
-                &[0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00],
+                &[0x00, 0x00, 0x00, 0x00, 0x00, flag::Flag::DISP_OPT_RAM_PINGPONG, 0x00, 0x00, 0x00, 0x00],
             )
             .await?;
 
         // Border waveform: HiZ during partial update
         self.interface
-            .cmd_with_data(cmd::Cmd::BORDER_WAVEFORM_CONTROL, &[0x80])
+            .cmd_with_data(cmd::Cmd::BORDER_WAVEFORM_CONTROL, &[flag::Flag::BORDER_WAVEFORM_HIZ])
             .await?;
 
         // Enable clock and analog, then wait — prepares controller to accept new image data
@@ -219,19 +231,19 @@ where
 
     async fn load_partial_lut(&mut self) -> Result<(), DisplayError> {
         self.interface
-            .cmd_with_data(cmd::Cmd::WRITE_LUT, &PARTIAL_LUT[..153])
+            .cmd_with_data(cmd::Cmd::WRITE_LUT, &PARTIAL_LUT[..LUT_MAIN_LEN])
             .await?;
         self.interface
-            .cmd_with_data(cmd::Cmd::WRITE_LUT_END, &PARTIAL_LUT[153..154])
+            .cmd_with_data(cmd::Cmd::WRITE_LUT_END, &PARTIAL_LUT[LUT_END_OPTION_OFFSET..LUT_GATE_VOLTAGE_OFFSET])
             .await?;
         self.interface
-            .cmd_with_data(cmd::Cmd::GATE_DRIVING_VOLTAGE, &PARTIAL_LUT[154..155])
+            .cmd_with_data(cmd::Cmd::GATE_DRIVING_VOLTAGE, &PARTIAL_LUT[LUT_GATE_VOLTAGE_OFFSET..LUT_SOURCE_VOLTAGE_OFFSET])
             .await?;
         self.interface
-            .cmd_with_data(cmd::Cmd::SOURCE_DRIVING_VOLTAGE, &PARTIAL_LUT[155..158])
+            .cmd_with_data(cmd::Cmd::SOURCE_DRIVING_VOLTAGE, &PARTIAL_LUT[LUT_SOURCE_VOLTAGE_OFFSET..LUT_VCOM_OFFSET])
             .await?;
         self.interface
-            .cmd_with_data(cmd::Cmd::WRITE_VCOM, &PARTIAL_LUT[158..159])
+            .cmd_with_data(cmd::Cmd::WRITE_VCOM, &PARTIAL_LUT[LUT_VCOM_OFFSET..])
             .await
     }
 

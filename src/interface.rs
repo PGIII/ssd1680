@@ -9,6 +9,8 @@ use embedded_hal_async::delay::DelayNs as AsyncDelayNs;
 use embedded_hal_async::spi::SpiDevice as AsyncSpiDevice;
 
 const RESET_DELAY_MS: u32 = 10;
+const BRIEF_RESET_DELAY_MS: u32 = 1;
+const BUSY_POLL_DELAY_MS: u32 = 1;
 
 #[maybe_async_cfg::maybe(
     sync(keep_self),
@@ -110,7 +112,7 @@ where
     /// Waits until device isn't busy anymore (busy == HIGH)
     pub(crate) async fn wait_until_idle(&mut self, delay: &mut impl DelayNs) {
         while self.busy.is_high().unwrap_or(true) {
-            delay.delay_ms(1).await;
+            delay.delay_ms(BUSY_POLL_DELAY_MS).await;
         }
     }
 
@@ -126,7 +128,7 @@ where
     /// without disturbing register settings or RAM contents.
     pub(crate) async fn brief_reset(&mut self, delay: &mut impl DelayNs) {
         self.rst.set_low().unwrap();
-        delay.delay_ms(1).await;
+        delay.delay_ms(BRIEF_RESET_DELAY_MS).await;
         self.rst.set_high().unwrap();
     }
 }
